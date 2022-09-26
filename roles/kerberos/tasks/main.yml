@@ -17,3 +17,12 @@
   tags:
     - never
     - principals
+
+- name: include tasks for configuring clients
+  ansible.builtin.include_tasks:
+    file: kerberos-client.yml
+    apply:
+      tags: client
+  tags:
+    - never
+    - client

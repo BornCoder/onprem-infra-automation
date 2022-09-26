@@ -8,3 +8,13 @@
         - never
         - kdc-kadmin
         - principals
+
+- hosts: all
+  remote_user: root
+  tasks:
+    - name: include kerberos role
+      ansible.builtin.include_role:
+        name: kerberos
+      tags:
+        - never
+        - client
