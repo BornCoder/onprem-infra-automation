@@ -1,0 +1,163 @@
+#tasks for managing dns records
+- name: ensure backup dir exists for records file
+  ansible.builtin.file:
+    path: /var/named/{{ dns_server.domain }}_backups
+    state: directory
+    owner: named
+    group: named
+    mode: '0750'
+
+- name: check if record file exists for forward zone
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.records.db
+  register: forward_zone_records
+
+- name: read forward zone file
+  ansible.builtin.slurp:
+    src: /var/named/{{ dns_server.domain }}.db
+  register: forward_zone_file
+  when: forward_zone_records.stat.exists
+
+- name: get forward zone serial no. 
+  ansible.builtin.set_fact:
+    fwd_zone_serial_no: "{{ forward_zone_file['content'] | b64decode | regex_search('.*([0-9]+) ;serial.*','\\1') | first }}"
+  when: forward_zone_records.stat.exists
+
+- name: backup existing forward zone records file
+  ansible.builtin.copy:
+    remote_src: yes
+    src: /var/named/{{ dns_server.domain }}.records.db
+    dest: /var/named/{{ dns_server.domain }}_backups/{{ fwd_zone_serial_no }}.{{ dns_server.domain }}.records.db
+  when: forward_zone_records.stat.exists
+
+- name: get checksum of {{ fwd_zone_serial_no }}.{{ dns_server.domain }}.records.db
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}_backups/{{ fwd_zone_serial_no }}.{{ dns_server.domain }}.records.db
+  register: forward_zone_records_backup
+  when: forward_zone_records.stat.exists
+
+- name: remove current forward zone records file
+  ansible.builtin.file:
+    path: /var/named/{{ dns_server.domain }}.records.db
+    state: absent
+  when: forward_zone_records.stat.exists
+
+- name: create records file for forward zone
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.records.db
+    regexp: '^{{ item.subdomain }} .*'
+    line: '{{ item.subdomain }} IN {{ item.type }} {{ item.ip if item.ip is defined else item.target }} ;{{ item.type }} record for {{ item.subdomain }}.{{ dns_server.domain }}'
+    create: yes
+    owner: named
+    group: named
+    mode: '0640'
+  with_items:
+    - '{{ dns_records }}'
+
+- name: get checksum of {{ dns_server.domain }}.records.db
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.records.db
+  register: forward_zone_records
+  when: forward_zone_records.stat.exists
+
+- name: check for changes in records of forward zone
+  ansible.builtin.set_fact:
+    fwd_records_changed: "{{ 'False' if forward_zone_records.stat.checksum == forward_zone_records_backup.stat.checksum else 'True' | bool }}"
+  when: forward_zone_records.stat.exists
+
+- name: update serial no in forward zone file
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.db
+    regexp: '^(\s+) [0-9]+ (;serial.*)'
+    line: '\1 {{ fwd_zone_serial_no|int + 1 }} \2'
+    backrefs: yes
+  when: forward_zone_records.stat.exists and fwd_records_changed
+
+- name: include records file in forward zone file
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.db
+    line: $INCLUDE "/var/named/{{ dns_server.domain }}.records.db"
+    validate: /usr/sbin/named-checkzone {{ dns_server.domain }} %s
+  register: include_records_file_forward_zone
+
+- name: check if record file exists for reverse zone
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.records.rev.db
+  register: reverse_zone_records
+
+- name: read reverse zone file
+  ansible.builtin.slurp:
+    src: /var/named/{{ dns_server.domain }}.rev.db
+  register: reverse_zone_file
+  when: reverse_zone_records.stat.exists
+
+- name: get reverse zone serial no. 
+  ansible.builtin.set_fact:
+    rev_zone_serial_no: "{{ reverse_zone_file['content'] | b64decode | regex_search('.*([0-9]+) ;serial.*','\\1') | first }}"
+  when: reverse_zone_records.stat.exists
+
+- name: backup existing reverse zone records file
+  ansible.builtin.copy:
+    remote_src: yes
+    src: /var/named/{{ dns_server.domain }}.records.rev.db
+    dest: /var/named/{{ dns_server.domain }}_backups/{{ rev_zone_serial_no }}.{{ dns_server.domain }}.records.rev.db
+  when: reverse_zone_records.stat.exists
+
+- name: get checksum of {{ rev_zone_serial_no }}.{{ dns_server.domain }}.records.rev.db
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}_backups/{{ rev_zone_serial_no }}.{{ dns_server.domain }}.records.rev.db
+  register: reverse_zone_records_backup
+  when: reverse_zone_records.stat.exists
+
+- name: remove current reverse zone records file
+  ansible.builtin.file:
+    path: /var/named/{{ dns_server.domain }}.records.rev.db
+    state: absent
+  when: reverse_zone_records.stat.exists
+
+- name: create records file for reverse zone
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.records.rev.db
+    regexp: "^{{ item.ip.split('.')[3] }} .*"
+    line: "{{ item.ip.split('.')[3] }} IN PTR {{ item.subdomain }}.{{ dns_server.domain }}. ;Reverse lookup for {{ item.subdomain }}.{{ dns_server.domain }}"
+    create: yes
+    owner: named
+    group: named
+    mode: '0640'
+  when: item.ip is defined
+  with_items:
+    - '{{ dns_records }}'
+
+- name: get checksum of {{ dns_server.domain }}.records.db
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.records.rev.db
+  register: reverse_zone_records
+  when: reverse_zone_records.stat.exists
+
+- name: check for changes in records of reverse zone
+  ansible.builtin.set_fact:
+    rev_records_changed: "{{ 'False' if reverse_zone_records.stat.checksum == reverse_zone_records_backup.stat.checksum else 'True' | bool }}"
+  when: reverse_zone_records.stat.exists
+
+- name: update serial no in reverse zone file
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.rev.db
+    regexp: '^(\s+) [0-9]+ (;serial.*)'
+    line: '\1 {{ rev_zone_serial_no|int + 1 }} \2'
+    backrefs: yes
+  when: reverse_zone_records.stat.exists and rev_records_changed
+
+- name: include records file in reverse zone file
+  ansible.builtin.lineinfile:
+    path: /var/named/{{ dns_server.domain }}.rev.db
+    line: $INCLUDE "/var/named/{{ dns_server.domain }}.records.rev.db"
+    validate: /usr/sbin/named-checkzone {{ dns_server.ip }} %s
+  register: include_records_file_reverse_zone
+
+- name: restart dns server
+  ansible.builtin.service:
+    name: named
+    state: restarted
+    enabled: yes
+  when: fwd_records_changed|default('True') or rev_records_changed|default('True') or include_records_file_forward_zone.changed or include_records_file_reverse_zone.changed
+  tags: dns-records
