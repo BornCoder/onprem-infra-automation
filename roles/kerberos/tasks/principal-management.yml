@@ -8,18 +8,44 @@
     cmd: >
       /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy users {{ item.name }}'
   when: item.type == 'user'
-  with_items: "{{ principals }}"
+  with_items: '{{ principals }}'
+  no_log: true
 
 - name: create host principals
   ansible.builtin.shell:
     cmd: >
       /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts {{ item.name }}.{{ realms.domain }}/host'
   when: item.type == 'host'
-  with_items: "{{ principals }}"
+  with_items: '{{ principals }}'
+  no_log: true
 
 - name: create admin principals
   ansible.builtin.shell:
     cmd: >
       /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy admin {{ item.name }}/admin'
   when: item.type == 'admin'
-  with_items: "{{ principals }}"
+  with_items: '{{ principals }}'
+  no_log: true
+
+- name: get list of existing principals
+  ansible.builtin.shell:
+    cmd: >
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'listprincs'
+  register: existing_principals
+
+- name: create list of required principals
+  ansible.builtin.set_fact:
+    required_princs: "{{ required_princs|default([]) + [ item.name if item.type == 'user' else item.name+'/'+item.type if item.type == 'admin' else item.name+'.'+realms.domain+'/'+item.type ] }}"
+  with_items: '{{ principals }}'
+  no_log: true
+
+- name: update required_princs with root principal and host
+  ansible.builtin.set_fact:
+    required_princs: "{{ required_princs + [ realms.root_principal+'/admin' ] + [ realms.subdomain+'.'+realms.domain+'/host' ] }}"
+
+- name: removing principals that shouldn't exists
+  ansible.builtin.shell:
+    cmd: >
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'delprinc -force {{ item.split('@')[0] }}'
+  when: ('kadmin' not in item) and ('K/M' not in item) and ('kiprop' not in item) and ('krbtgt' not in item) and (item.split('@')[0] not in required_princs)
+  with_items: '{{ existing_principals.stdout_lines[1:] }}'
