@@ -166,7 +166,6 @@
     name: named
     state: restarted
     enabled: yes
-  tags: dns-server
 
 - name: allow dns service through firewall
   ansible.posix.firewalld:

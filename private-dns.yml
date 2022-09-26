@@ -6,8 +6,8 @@
         name: private-dns
       tags:
         - never
-        - dns-server
-        - dns-records
+        - server
+        - records
 
 - hosts: targets
   remote_user: root
@@ -17,4 +17,4 @@
         name: private-dns
       tags:
         - never
-        - dns-client
+        - client

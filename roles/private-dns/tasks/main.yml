@@ -4,25 +4,25 @@
   ansible.builtin.include_tasks:
     file: dns-server.yml
     apply:
-      tags: dns-server
+      tags: server
   tags:
     - never
-    - dns-server
+    - server
 
 - name: include tasks for configuring dns records
   ansible.builtin.include_tasks:
     file: dns-records.yml
     apply:
-      tags: dns-records
+      tags: records
   tags:
     - never
-    - dns-records
+    - records
 
 - name: include tasks for configuring dns clients
   ansible.builtin.include_tasks:
     file: dns-client.yml
     apply:
-      tags: dns-client
+      tags: client
   tags:
     - never
-    - dns-client
+    - client
