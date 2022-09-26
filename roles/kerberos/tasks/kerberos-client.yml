@@ -1,0 +1,55 @@
+#tasks for configuring kerneros clients
+- name: check reachability to kdc server
+  ansible.builtin.shell:
+    cmd:
+      ping -c 1 {{ realms.subdomain }}.{{ realms.domain }}
+
+- name: install kerberos packages
+  ansible.builtin.yum:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - krb5-libs
+    - krb5-workstation
+
+- name: download krb5.conf from kdc host
+  ansible.builtin.fetch:
+    src: /etc/krb5.conf
+    dest: /tmp/krb5.conf
+    flat: yes
+  when: ansible_hostname == kdc.host
+
+- name: copy krb5.conf to clients
+  ansible.builtin.copy:
+    src: /tmp/krb5.conf
+    dest: /etc/krb5.conf
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: get tgt for kerberos admin
+  ansible.builtin.shell:
+    cmd: >
+      /usr/bin/kinit {{ realms.root_principal }}/admin <<< {{ realms.root_principal_pass }}
+  no_log: true
+
+- name: check if host principals exists
+  ansible.builtin.shell:
+    cmd: >
+      /usr/bin/kadmin -q 'listprincs {{ ansible_hostname }}.{{ realms.domain }}/host' <<< {{ realms.root_principal_pass }}
+  register: host_princ_check
+  failed_when: host_princ_check.stdout_lines[2] is not defined
+  ignore_errors: true
+  no_log: true
+
+- name: generate keytabs
+  ansible.builtin.shell:
+    cmd: >
+      /usr/bin/kadmin -q 'ktadd {{ ansible_hostname }}.{{ realms.domain }}/host' <<< {{ realms.root_principal_pass }}
+  when: host_princ_check is succeeded
+  no_log: true
+
+- name: destroy tgt of kerberos admin
+  ansible.builtin.shell:
+    cmd: >
+      /usr/bin/kdestroy

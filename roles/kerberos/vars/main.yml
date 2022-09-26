@@ -5,6 +5,7 @@
 kdc:
   ports: 88
   preauth_challenge: edwards25519
+  host: admin
 
 #realms config
 realms:
