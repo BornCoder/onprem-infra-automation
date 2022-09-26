@@ -1,0 +1,25 @@
+#tasks for principal management
+- name: set kdc vars
+  ansible.builtin.set_fact:
+    db_location: '{{ (realms.db_location|default("/var/kerberos/krb5kdc"))+"/"+realms.domain+".db" }}'
+
+- name: create user principals
+  ansible.builtin.shell:
+    cmd: >
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy users {{ item.name }}'
+  when: item.type == 'user'
+  with_items: "{{ principals }}"
+
+- name: create host principals
+  ansible.builtin.shell:
+    cmd: >
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts {{ item.name }}.{{ realms.domain }}/host'
+  when: item.type == 'host'
+  with_items: "{{ principals }}"
+
+- name: create admin principals
+  ansible.builtin.shell:
+    cmd: >
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy admin {{ item.name }}/admin'
+  when: item.type == 'admin'
+  with_items: "{{ principals }}"
