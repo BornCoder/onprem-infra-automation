@@ -1,0 +1,21 @@
+#tasks to configure ntp client
+- name: install chrony package
+  ansible.builtin.yum:
+    name: chrony
+    state: present
+  when: ansible_hostname != ntp.host.split('.')[0]
+
+- name: add ntp server in config
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: '^Server'
+    line: 'Server {{ ntp.host }}'
+  register: update_ntp_server
+  when: ansible_hostname != ntp.host.split('.')[0]
+
+- name: restart chrony server
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+    enabled: yes
+  when: ansible_hostname != ntp.host.split('.')[0] and update_ntp_server.changed

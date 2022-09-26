@@ -1,0 +1,19 @@
+- hosts: admin
+  remote_user: root
+  tasks:
+    - name: include role ntp
+      ansible.builtin.include_role:
+        name: ntp
+      tags:
+        - never
+        - server
+
+- hosts: targets
+  remote_user: root
+  tasks:
+    - name: include role ntp
+      ansible.builtin.include_role:
+        name: ntp
+      tags:
+        - never
+        - clients

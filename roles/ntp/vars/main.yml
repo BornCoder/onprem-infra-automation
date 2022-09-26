@@ -1,0 +1,8 @@
+---
+# vars file for ntp
+network_subnet: 192.168.11.0/24
+
+# ntp details
+ntp:
+  host: admin.private.net #fqdn of host
+  #pool: #default vault is 2.rhel.pool.ntp.org

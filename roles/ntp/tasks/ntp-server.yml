@@ -1,0 +1,34 @@
+#tasks to configure ntp server
+- name: install chrony package
+  ansible.builtin.yum:
+    name: chrony
+    state: present
+
+- name: allow access to client subnet
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: '^#allow'
+    line: allow {{ network_subnet }}
+  register: update_subnet
+
+- name: set ntp pool
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: '^pool'
+    line: pool {{ ntp.pool }} iburst
+  register: update_pool
+  when: ntp.pool is defined
+
+- name: restart chrony server
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+    enabled: yes
+  when: update_subnet.changed or update_pool.changed
+
+- name: allow ntp service through firewall
+  ansible.posix.firewalld:
+    service: ntp
+    permanent: yes
+    state: enabled
+

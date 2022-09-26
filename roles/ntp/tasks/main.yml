@@ -1,0 +1,19 @@
+---
+# tasks file for ntp
+- name: configure ntp server
+  ansible.builtin.include_tasks:
+    file: ntp-server.yml
+    apply:
+      tags: server
+  tags:
+    - never
+    - server
+
+- name: configure ntp clients
+  ansible.builtin.include_tasks:
+    file: ntp-client.yml
+    apply:
+      tags: clients
+  tags:
+    - never
+    - clients
