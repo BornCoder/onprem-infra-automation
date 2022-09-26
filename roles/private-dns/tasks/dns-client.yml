@@ -1,0 +1,60 @@
+#tasks to configure dns clients with current dns server
+- name: update hostname to reflect {{ dns_server.domain }}
+  ansible.builtin.lineinfile:
+    path: /etc/hostname
+    regexp: ^{{ ansible_hostname }}
+    line: "{{ ansible_hostname }}.{{ dns_server.domain }}"
+
+- name: set dns priority
+  ansible.builtin.set_fact:
+    priority: 11
+
+- name: update network-script for interface {{ clients.interface }}
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/network-scripts/ifcfg-{{ clients.interface }}
+    regexp: '{{ item.reg }}'
+    line: '{{ item.line }}'
+    validate: /usr/bin/nmcli connection load %s
+  register: network_script
+  with_items:
+    - reg: '^DNS1'
+      line: 'DNS1={{ dns_server.ip }}'
+    - reg: '^DOMAIN'
+      line: 'DOMAIN={{ dns_server.domain }}'
+    - reg: '^IPV4_DNS_PRIORITY'
+      line: 'IPV4_DNS_PRIORITY={{ priority }}'
+    - reg: '^BOOTPROTO'
+      line: 'BOOTPROTO=none'
+    - reg: '^IPADDR'
+      line: 'IPADDR={{ ansible_host }}'
+    - reg: '^NETMASK'
+      line: 'NETMASK=255.255.255.0'
+
+- name: find list of interfaces
+  ansible.builtin.find:
+    paths: /etc/sysconfig/network-scripts
+  register: interfaces
+  when: network_script.changed
+
+- name: assign lower priority to other interfaces
+  ansible.builtin.lineinfile:
+    path: '{{ item.path }}'
+    regexp: '^IPV4_DNS_PRIORITY'
+    line: 'IPV4_DNS_PRIORITY={{ priority + index + 1 }}'
+  when: network_script.changed and item.path.split('-')[2] != clients.interface
+  loop: '{{ interfaces.files }}'
+  loop_control:
+    index_var: index
+
+- name: restart networkmanager
+  ansible.builtin.service:
+    name: NetworkManager
+    state: restarted
+  when: network_script.changed
+
+- name: check dns server reachability via domain name
+  ansible.builtin.shell:
+    cmd: "ping -c 1 {{ dns_server.subdomain }}.{{ dns_server.domain }}"
+  when: network_script.changed
+
+  
