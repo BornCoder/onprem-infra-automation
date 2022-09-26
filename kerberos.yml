@@ -1,0 +1,10 @@
+- hosts: admin
+  remote_user: root
+  tasks:
+    - name: include kerberos role
+      ansible.builtin.include_role:
+        name: kerberos
+      tags:
+        - never
+        - kdc-kadmin
+        - principals

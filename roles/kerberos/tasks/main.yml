@@ -1,0 +1,19 @@
+---
+# tasks file for kerberos
+- name: include tasks for configuring kdc server
+  ansible.builtin.include_tasks:
+    file: kdc-kadmin-server.yml
+    apply:
+      tags: kdc-kadmin
+  tags:
+    - never
+    - kdc-kadmin
+
+- name: include tasks for managing principals
+  ansible.builtin.include_tasks:
+    file: principal-management.yml
+    apply:
+      tags: principals
+  tags:
+    - never
+    - principals
