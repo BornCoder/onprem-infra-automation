@@ -1,0 +1,175 @@
+#tasks fir setting up dns server
+- name: install bind packages
+  ansible.builtin.yum:
+    name: bind*:9.11.36*
+    state: present
+
+- name: edit /etc/resolv.conf to update search domain
+  ansible.builtin.lineinfile:
+    path: /etc/resolv.conf
+    regexp: ^search
+    line: search {{ dns_server.domain }}
+
+- name: edit /etc/resolv.conf to add nameserver ip
+  ansible.builtin.lineinfile:
+    path: /etc/resolv.conf
+    insertafter: ^search
+    line: nameserver {{ dns_server.ip }}
+
+- name: check if backup of /etc/named.conf exists
+  ansible.builtin.stat:
+    path: /etc/named.original.conf
+  register: file
+
+- name: create backup of /etc/named.conf
+  ansible.builtin.copy:
+    remote_src: yes
+    src: /etc/named.conf
+    dest: /etc/named.original.conf
+    owner: root
+    group: named
+    mode: '0640'
+  when: not file.stat.exists
+
+- name: update /etc/named.conf
+  ansible.builtin.lineinfile:
+    path: /etc/named.conf
+    regexp: '{{ item.regexp }}'
+    line: '{{ item.line }}'
+    backrefs: yes
+  with_items:
+    - regexp: '^(\s+listen-on .*)'
+      line: '//\1'    
+    - regexp: '^(\s+listen-on-v6 .*)'
+      line: '//\1'
+    - regexp: '^(\s+allow-query\s+).*'
+      line: '\1{ localhost; {{ network_subnet }}; };'
+
+- name: create zone reference file for {{ dns_server.domain }}
+  ansible.builtin.copy:
+    dest: /etc/named.{{ dns_server.domain }}.zones
+    content: |
+      //forward zone
+      zone "{{ dns_server.domain }}" IN {
+           type master;
+           file "{{ dns_server.domain }}.db";
+           allow-update { none; };
+           allow-query { any; };
+      };
+
+      //backward zone
+      zone "{{ dns_server.ip.split('.')[2]}}.{{ dns_server.ip.split('.')[1] }}.{{ dns_server.ip.split('.')[0] }}.in-addr.arpa" IN {
+           type master;
+           file "{{ dns_server.domain }}.rev.db";
+           allow-update { none; };
+           allow-query { any; };
+      };
+    owner: root
+    group: named
+    mode: '0640'
+    validate: /usr/sbin/named-checkconf %s
+
+- name: include zone file in /etc/named.conf
+  ansible.builtin.lineinfile:
+    path: /etc/named.conf
+    line: include "/etc/named.{{ dns_server.domain }}.zones";
+    validate: /usr/sbin/named-checkconf %s
+
+- name: check if forward zone file exists
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.db
+  register: forward_zone
+
+- name: read forward zone file
+  ansible.builtin.slurp:
+    src: /var/named/{{ dns_server.domain }}.db
+  register: forward_zone_file
+  when: forward_zone.stat.exists
+
+- name: get current forward zone serial no. 
+  ansible.builtin.set_fact:
+    fwd_zone_serial_no: "{{ forward_zone_file['content'] | b64decode | regex_search('.*([0-9]+) ;serial.*','\\1') | first }}"
+  when: forward_zone.stat.exists
+
+- name: create forward zone file {{ dns_server.domain }}.db
+  ansible.builtin.copy:
+    dest: /var/named/{{ dns_server.domain }}.db
+    content: |
+      $TTL {{ dns_config.ttl }}
+      @ IN SOA {{ dns_server.subdomain }}.{{ dns_server.domain }}. {{ dns_server.host }}. (
+                                                      {{ fwd_zone_serial_no if fwd_zone_serial_no is defined else 1 }} ;serial no
+                                                      {{ dns_config.refresh }} ;refresh duration
+                                                      {{ dns_config.retry }} ;retry duration
+                                                      {{ dns_config.expire }} ;expire duration
+                                                      {{ dns_config.min_ttl }} ;minimum TTL
+      )
+
+      ;Name Server Information
+      @ IN NS {{ dns_server.subdomain }}.{{ dns_server.domain }}.
+
+      ;IP Address for Name Server
+      {{ dns_server.subdomain }} IN A {{ dns_server.ip }}
+
+      ;CNAME record for admin server
+      {{ dns_server.host.split('.')[0] }} IN CNAME {{ dns_server.subdomain }}.{{ dns_server.domain }}.
+
+    owner: named
+    group: named
+    mode: '0640'
+    validate: '/usr/sbin/named-checkzone {{ dns_server.domain }} %s'
+
+- name: check if reverse zone file exists
+  ansible.builtin.stat:
+    path: /var/named/{{ dns_server.domain }}.rev.db
+  register: reverse_zone
+
+- name: read reverse zone file
+  ansible.builtin.slurp:
+    src: /var/named/{{ dns_server.domain }}.rev.db
+  register: reverse_zone_file
+  when: reverse_zone.stat.exists
+
+- name: get current reverse zone serial no. 
+  ansible.builtin.set_fact:
+    rev_zone_serial_no: "{{ reverse_zone_file['content'] | b64decode | regex_search('.*([0-9]+) ;serial.*','\\1') | first }}"
+  when: reverse_zone.stat.exists
+
+- name: create reverse zone file {{ dns_server.domain }}.rev.db
+  ansible.builtin.copy:
+    dest: /var/named/{{ dns_server.domain }}.rev.db
+    content: |
+      $TTL {{ dns_config.ttl }}
+      @ IN SOA {{ dns_server.subdomain }}.{{ dns_server.domain }}. {{ dns_server.host }}. (
+                                                      {{ rev_zone_serial_no if fwd_zone_serial_no is defined else 1 }} ;serial no
+                                                      {{ dns_config.refresh }} ;refresh duration
+                                                      {{ dns_config.retry }} ;retry duration
+                                                      {{ dns_config.expire }} ;expire duration
+                                                      {{ dns_config.min_ttl }} ;minimum TTL
+      )
+
+      ;Name Server Information
+      @ IN NS {{ dns_server.subdomain }}.{{ dns_server.domain }}.
+
+      ;IP Address for Name Server
+      {{ dns_server.subdomain }} IN A {{ dns_server.ip }}
+
+      ;Reverse lookup for Name Server
+      {{ dns_server.ip.split('.')[3] }} IN PTR {{ dns_server.subdomain }}.{{ dns_server.domain }}.
+
+    owner: named
+    group: named
+    mode: '0640'
+    validate: '/usr/sbin/named-checkzone {{ dns_server.ip }} %s'
+
+- name: restart dns server
+  ansible.builtin.service:
+    name: named
+    state: restarted
+    enabled: yes
+  tags: dns-server
+
+- name: allow dns service through firewall
+  ansible.posix.firewalld:
+    service: dns
+    permanent: yes
+    state: enabled

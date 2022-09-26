@@ -1,0 +1,28 @@
+---
+# tasks file for private-dns
+- name: include tasks for configuring dns server
+  ansible.builtin.include_tasks:
+    file: dns-server.yml
+    apply:
+      tags: dns-server
+  tags:
+    - never
+    - dns-server
+
+- name: include tasks for configuring dns records
+  ansible.builtin.include_tasks:
+    file: dns-records.yml
+    apply:
+      tags: dns-records
+  tags:
+    - never
+    - dns-records
+
+- name: include tasks for configuring dns clients
+  ansible.builtin.include_tasks:
+    file: dns-client.yml
+    apply:
+      tags: dns-client
+  tags:
+    - never
+    - dns-client

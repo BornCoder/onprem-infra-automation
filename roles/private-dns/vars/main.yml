@@ -1,0 +1,42 @@
+---
+# vars file for private-dns
+
+#network subnet to allow access to dns server
+network_subnet: 192.168.11.0/24
+
+#clients specific config
+clients:
+  interface: enp0s8
+
+#dns server details
+dns_server:
+  ip: 192.168.11.11
+  host: admin.private.net
+  subdomain: dns
+  domain: private.net
+
+#dns configuration details
+dns_config:
+  ttl: 86400 #This is short for Time-To-Live. TTL is the duration of time (or hops) that a packet exists in a network before finally being discarded by the router.
+  refresh: 3600 #How long in seconds a nameserver should wait prior to checking for a Serial Number increase within the primary zone file. An increased Serial Number means a transfer is needed to sync your records. Only applies to zones using secondary DNS.
+  retry: 1800 #How long in seconds a nameserver should wait prior to retrying to update a zone after a failed attempt. Only applies to zones using secondary DNS.
+  expire: 604800 #How long in seconds a nameserver should wait prior to considering data from a secondary zone invalid and stop answering queries for that zone. Only applies to zones using secondary DNS.
+  min_ttl: 1800 #How long in seconds that a nameserver or resolver should cache a negative response.
+
+#dns records config
+dns_records:
+  - type: A
+    subdomain: master1
+    ip: 192.168.11.5
+  - type: A
+    subdomain: slave1
+    ip: 192.168.11.6
+  - type: A
+    subdomain: slave2
+    ip: 192.168.11.7
+  - type: A
+    subdomain: slave3
+    ip: 192.168.11.8
+  - type: CNAME
+    subdomain: kdc
+    target: admin.private.net.

@@ -1,0 +1,20 @@
+- hosts: admin
+  remote_user: root
+  tasks:
+    - name: include role private-dns
+      ansible.builtin.include_role:
+        name: private-dns
+      tags:
+        - never
+        - dns-server
+        - dns-records
+
+- hosts: targets
+  remote_user: root
+  tasks:
+    - name: include role private-dns
+      ansible.builtin.include_role:
+        name: private-dns
+      tags:
+        - never
+        - dns-client
