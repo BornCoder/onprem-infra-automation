@@ -25,31 +25,51 @@
     dest: /etc/krb5.conf
     owner: root
     group: root
-    mode: '0640'
+    mode: '0644'
+
+- name: check if keytab exists
+  ansible.builtin.stat:
+    path: /etc/krb5.keytab
+  register: keytab
+
+- name: remove existing keytab
+  ansible.builtin.file:
+    path: /etc/krb5.keytab
+    state: absent
+  when: clients.regen_keytab
 
 - name: get tgt for kerberos admin
   ansible.builtin.shell:
     cmd: >
       /usr/bin/kinit {{ realms.root_principal }}/admin <<< {{ realms.root_principal_pass }}
+  when: (not keytab.stat.exists) or clients.regen_keytab
   no_log: true
 
 - name: check if host principals exists
   ansible.builtin.shell:
     cmd: >
-      /usr/bin/kadmin -q 'listprincs {{ ansible_hostname }}.{{ realms.domain }}/host' <<< {{ realms.root_principal_pass }}
+      /usr/bin/kadmin -q 'listprincs host/{{ ansible_hostname }}.{{ realms.domain }}' <<< {{ realms.root_principal_pass }}
   register: host_princ_check
   failed_when: host_princ_check.stdout_lines[2] is not defined
   ignore_errors: true
+  when: (not keytab.stat.exists) or clients.regen_keytab
   no_log: true
 
 - name: generate keytabs
   ansible.builtin.shell:
     cmd: >
-      /usr/bin/kadmin -q 'ktadd {{ ansible_hostname }}.{{ realms.domain }}/host' <<< {{ realms.root_principal_pass }}
-  when: host_princ_check is succeeded
+      /usr/bin/kadmin -q 'ktadd host/{{ ansible_hostname }}.{{ realms.domain }}' <<< {{ realms.root_principal_pass }}
+  when: host_princ_check is succeeded and ((not keytab.stat.exists) or clients.regen_keytab)
   no_log: true
+
+- name: allow read permission to keytab file
+  ansible.builtin.file:
+    path: /etc/krb5.keytab
+    mode: '0644'
+  when: (not keytab.stat.exists) or clients.regen_keytab
 
 - name: destroy tgt of kerberos admin
   ansible.builtin.shell:
     cmd: >
       /usr/bin/kdestroy
+  when: (not keytab.stat.exists) or clients.regen_keytab

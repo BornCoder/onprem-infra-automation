@@ -1,0 +1,46 @@
+#tasks to enable kerberos based sso for services
+- name: check if sso is required for ssh service
+  ansible.builtin.set_fact:
+    sso_ssh: "{{ clients.sso_services.ssh.enabled|bool }}"
+
+- name: enable GSSAPI authentication for ssh service
+  ansible.builtin.copy:
+    dest: /etc/ssh/ssh_config.d/kerberos.conf
+    content: |
+      Host *
+        GSSAPIAuthentication yes
+  register: gssapi_auth
+  when: sso_ssh
+
+- name: restart sshd service
+  ansible.builtin.service:
+    name: sshd
+    state: restarted
+  when: sso_ssh and gssapi_auth.changed
+
+- name: create users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+  when: sso_ssh and item.type == 'user'
+  with_items: "{{ principals }}"
+  no_log: true
+
+- name: generate k5login content
+  ansible.builtin.set_fact:
+    k5login_content: "{{ k5login_content|default([]) + [ item.name+'@'+realms.domain|upper ] }}"
+  when: sso_ssh and clients.sso_services.ssh.priviledged_users|length > 0 and item.type == 'user' and item.name in clients.sso_services.ssh.priviledged_users
+  with_items: "{{ principals }}"
+  no_log: true
+
+- name: grant root access to users
+  ansible.builtin.copy:
+    dest: /root/.k5login
+    content: |
+      {{ k5login_content|join('\n') }}
+  when: sso_ssh and clients.sso_services.ssh.priviledged_users|length > 0
+
+- name: remove .k5login file
+  ansible.builtin.file:
+    path: /root/.k5login
+    state: absent
+  when: sso_ssh and clients.sso_services.ssh.priviledged_users|length == 0

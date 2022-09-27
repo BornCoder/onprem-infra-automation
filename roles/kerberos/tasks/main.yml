@@ -26,3 +26,12 @@
   tags:
     - never
     - client
+
+- name: include tasks for configuring sso enabled services
+  ansible.builtin.include_tasks:
+    file: sso-enabled-services.yml
+    apply:
+      tags: sso
+  tags:
+    - never
+    - sso

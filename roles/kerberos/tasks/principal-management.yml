@@ -14,7 +14,7 @@
 - name: create host principals
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts {{ item.name }}.{{ realms.domain }}/host'
+      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts host/{{ item.name }}.{{ realms.domain }}'
   when: item.type == 'host'
   with_items: '{{ principals }}'
   no_log: true
@@ -35,13 +35,13 @@
 
 - name: create list of required principals
   ansible.builtin.set_fact:
-    required_princs: "{{ required_princs|default([]) + [ item.name if item.type == 'user' else item.name+'/'+item.type if item.type == 'admin' else item.name+'.'+realms.domain+'/'+item.type ] }}"
+    required_princs: "{{ required_princs|default([]) + [ item.name if item.type == 'user' else item.name+'/'+item.type if item.type == 'admin' else item.type+'/'+item.name+'.'+realms.domain ] }}"
   with_items: '{{ principals }}'
   no_log: true
 
 - name: update required_princs with root principal and host
   ansible.builtin.set_fact:
-    required_princs: "{{ required_princs + [ realms.root_principal+'/admin' ] + [ realms.subdomain+'.'+realms.domain+'/host' ] }}"
+    required_princs: "{{ required_princs + [ realms.root_principal+'/admin' ] + [ 'host/'+realms.subdomain+'.'+realms.domain ] }}"
 
 - name: removing principals that shouldn't exists
   ansible.builtin.shell:
