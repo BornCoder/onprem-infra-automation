@@ -4,5 +4,6 @@ network_subnet: 192.168.11.0/24
 
 # ntp details
 ntp:
-  host: admin.private.net #fqdn of host
-  #pool: #default vault is 2.rhel.pool.ntp.org
+  host: dns.private.net #fqdn of host
+  pool: in.pool.ntp.org #default vault is 2.rhel.pool.ntp.org
+  time_zone: Asia/Kolkata #default UTC

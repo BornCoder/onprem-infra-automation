@@ -16,4 +16,4 @@
         name: ntp
       tags:
         - never
-        - clients
+        - client

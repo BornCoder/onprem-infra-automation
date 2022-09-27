@@ -13,7 +13,7 @@
   ansible.builtin.include_tasks:
     file: ntp-client.yml
     apply:
-      tags: clients
+      tags: client
   tags:
     - never
-    - clients
+    - client
