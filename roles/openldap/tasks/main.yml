@@ -1,0 +1,184 @@
+---
+# tasks file for openldap
+- name: check if ldapserver is aleady installed
+  ansible.builtin.stat:
+    path: /usr/local/libexec/slapd
+  register: ldap
+
+- name: set status for ldapserver check
+  ansible.builtin.set_fact:
+    install_ldap: '{{ not ldap.stat.exists }}'
+
+- name: download build packages
+  ansible.builtin.yum:
+    name: '{{ item }}'
+  when: install_ldap
+  with_items:
+    - 'make'
+    - 'openssl-devel'
+    - 'openldap-devel'
+    - 'cyrus-sasl-devel'
+
+- name: install python ldap package
+  ansible.builtin.pip:
+    name: python-ldap
+
+- name: check if source code already exists
+  ansible.builtin.stat:
+    path: /tmp/openldap-{{ openldap.version }}
+  register: sourcecode
+  when: install_ldap
+
+- name: download and extract openldap source code
+  ansible.builtin.unarchive:
+    src: https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-{{ openldap.version }}.tgz
+    dest: /tmp
+    remote_src: yes
+  when: install_ldap and not sourcecode.stat.exists
+
+- name: check if make file exists
+  ansible.builtin.stat:
+    path: /tmp/openldap-{{ openldap.version }}/Makefile
+  register: makefile
+  when: install_ldap
+
+- name: configure source code
+  ansible.builtin.shell:
+    chdir: /tmp/openldap-{{ openldap.version }}
+    cmd: >
+      ./configure --enable-debug --with-tls=openssl --with-cyrus-sasl
+  when: install_ldap and not makefile.stat.exists
+
+- name: compile and install openldap
+  community.general.make:
+    chdir: /tmp/openldap-{{ openldap.version }}
+    target: '{{ item }}'
+  when: install_ldap
+  with_items:
+    - 'depend'  # make depend
+    - Null      # make
+    - 'install' # make install
+
+- name: get run user for openldap
+  ansible.builtin.set_fact:
+    ldap_user: "{{ openldap.user|default('ldap') }}"
+
+- name: create ldap user
+  ansible.builtin.user:
+    name: '{{ ldap_user }}'
+
+- name: create directories 
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: '{{ ldap_user }}'
+    group: '{{ ldap_user }}'
+    mode: '0700'
+  with_items:
+    - '/usr/local/etc/slapd.d'       # configuration dir
+    - '/usr/local/var/run'           # pid dir
+    - '/usr/local/var/openldap-data' # database dir
+
+- name: check if initial import of config is done
+  ansible.builtin.stat:
+    path: '/usr/local/etc/slapd.d/cn=config.ldif'
+  register: config_init
+
+- name: check if backup[ exists
+  ansible.builtin.stat:
+    path: /usr/local/etc/openldap/slapd.original.ldif
+  register: config_backup
+  when: not config_init.stat.exists
+
+- name: backup default config file
+  ansible.builtin.copy:
+    remote_src: yes
+    src: /usr/local/etc/openldap/slapd.ldif
+    dest: /usr/local/etc/openldap/slapd.original.ldif
+  when: not config_init.stat.exists and not config_backup.stat.exists
+
+- name: set root dn user
+  ansible.builtin.set_fact:
+    ldap_base_dn: 'dc={{ openldap.domain.split(".")[0] }},dc={{ openldap.domain.split(".")[1] }}'
+    ldap_root_dn: 'cn={{ openldap.root.user }},dc={{ openldap.domain.split(".")[0] }},dc={{ openldap.domain.split(".")[1] }}'
+
+- name: update config
+  ansible.builtin.lineinfile:
+    path: /usr/local/etc/openldap/slapd.ldif
+    regexp: '{{ item.regex }}'
+    line: '{{ item.line }}'
+    insertafter: '{{ item.insertafter|default("null") }}'
+  when: not config_init.stat.exists
+  with_items:
+    - line: 'olcSuffix: {{ ldap_base_dn }}'
+      regex: '^olcSuffix:'
+    - line: 'olcRootDN: {{ ldap_root_dn }}'
+      regex: '^olcRootDN: cn=Manager.*'
+      insertafter: '^olcSuffix: .*'
+    - line: 'olcRootPW: {{ openldap.root.password }}'
+      regex: '^olcRootPW:'
+
+- name: import initial config
+  ansible.builtin.shell:
+    cmd: >
+      /usr/local/sbin/slapadd -n 0 -F /usr/local/etc/slapd.d -l /usr/local/etc/openldap/slapd.ldif
+  register: import_cnf
+  when: not config_init.stat.exists
+
+- name: change ownership of config dir to ldap user
+  ansible.builtin.file:
+    path: /usr/local/etc/slapd.d
+    state: directory
+    recurse: yes
+    owner: '{{ ldap_user }}'
+    group: '{{ ldap_user }}'
+
+- name: create systemctl service files for openldap
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/slapd.service
+    content: |
+      [Unit]
+        Description=OpenLDAP Server Daemon
+        After=syslog.target network-online.target
+
+      [Service]
+        Type=forking
+        PIDFile=/usr/local/var/run/slapd.pid
+        Environment="SLAPD_URLS=ldap:/// ldapi:/// ldaps:///"
+        ExecStart=/usr/local/libexec/slapd -u '{{ ldap_user }}' -g '{{ ldap_user }}' -h ${SLAPD_URLS} -F /usr/local/etc/slapd.d
+
+      [Install]
+        WantedBy=multi-user.target
+    mode: '0640'
+  register: lddap_sysctl_srv
+
+- name: reload systemd daemon & start openldap server
+  ansible.builtin.systemd:
+    name: slapd
+    state: restarted
+    daemon-reload: '{{ "yes" if lddap_sysctl_srv.changed else "no" }}'
+  when: import_cnf.changed or lddap_sysctl_srv.changed
+
+- name: enable slapd service
+  ansible.builtin.service:
+    name: slapd
+    enabled: true
+
+- name: set ldap auth
+  ansible.builtin.set_fact:
+    ldap_auth:
+      server_uri: ldap://localhost/
+      bind_dn: '{{ ldap_root_dn }}'
+      bind_pw: '{{ openldap.root.password }}'
+
+- name: add basedn
+  community.general.ldap_entry:
+    dn: '{{ ldap_base_dn }}'
+    objectClass:
+      - top
+      - organization
+      - dcObject
+    attributes:
+      dc: '{{ openldap.domain.split(".")[0] }}'
+      o: '{{ openldap.domain.split(".")[0] }}'
+  args: '{{ ldap_auth }}'

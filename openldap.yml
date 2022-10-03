@@ -1,0 +1,6 @@
+- hosts: admin
+  remote_user: root
+  tasks:
+    - name: include role openldap
+      ansible.builtin.include_role:
+        name: openldap
