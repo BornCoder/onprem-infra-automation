@@ -182,3 +182,23 @@
       dc: '{{ openldap.domain.split(".")[0] }}'
       o: '{{ openldap.domain.split(".")[0] }}'
   args: '{{ ldap_auth }}'
+
+- name: create users ou
+  community.general.ldap_entry:
+    dn: 'ou=users,{{ ldap_base_dn }}'
+    objectClass:
+      - top
+      - organizationalUnit
+    attributes:
+      ou: users
+  args: '{{ ldap_auth }}'
+
+- name: create groups ou
+  community.general.ldap_entry:
+    dn: 'ou=groups,{{ ldap_base_dn }}'
+    objectClass:
+      - top
+      - organizationalUnit
+    attributes:
+      ou: groups
+  args: '{{ ldap_auth }}'
