@@ -1,6 +1,10 @@
 ---
 # vars file for kerberos
 
+#build from source code
+build_from_src: yes #This variable determines whether the kerberos will be installed as packages or built from source
+ver: '1.20' #Will be applicable if build_from_src is true
+
 #kdc config
 kdc:
   ports: 88

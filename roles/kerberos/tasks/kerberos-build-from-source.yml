@@ -1,0 +1,121 @@
+#tasks to build kerberos from source
+- name: check if kerberos is aleady installed
+  ansible.builtin.stat:
+    path: /usr/local/sbin/krb5kdc
+  register: krb5
+
+- name: set status for kerberos check
+  ansible.builtin.set_fact:
+    install_krb5: '{{ not krb5.stat.exists }}'
+
+- name: install required packages
+  ansible.builtin.yum:
+    name: '{{ item }}'
+  when: install_krb5
+  with_items:
+    - make
+    - byacc
+
+- name: check if source code already exists
+  ansible.builtin.stat:
+    path: /tmp/krb5-{{ ver }}
+  when: install_krb5
+  register: sourcecode
+
+- name: download & extract krb5 src
+  ansible.builtin.unarchive:
+    src: https://web.mit.edu/kerberos/dist/krb5/{{ ver }}/krb5-{{ ver }}.tar.gz
+    dest: /tmp
+    remote_src: yes
+  when: install_krb5 and not sourcecode.stat.exists
+
+- name: check if make file exists
+  ansible.builtin.stat:
+    path: /tmp/krb5-{{ ver }}/src/Makefile
+  register: makefile
+  when: install_krb5
+
+- name: configure source code
+  ansible.builtin.shell:
+    chdir: /tmp/krb5-{{ ver }}/src
+    cmd: >
+      ./configure --enable-dns --enable-dns-for-kdc --enable-dns-for-realm --enable-kdc-replay-cache
+  when: install_krb5 and not makefile.stat.exists
+
+- name: compile and install kerberos
+  community.general.make:
+    chdir: /tmp/krb5-{{ ver }}/src
+    target: '{{ item }}'
+  when: install_krb5
+  with_items:
+    - null      # make
+    - 'install' # make install
+
+- name: check if krb5.conf & kdc.conf file already exists
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  register: conf_check
+  with_items:
+    - /usr/local/var/krb5kdc/kdc.conf
+    - /etc/krb5.conf
+
+- name: copy krb5.conf & kdc.conf
+  ansible.builtin.copy:
+    remote_src: yes
+    src: '/usr/local/share/examples/krb5/{{ item.item | split("/") | last }}'
+    dest: '{{ item.item }}'
+  when: not item.stat.exists
+  with_items: '{{ conf_check.results }}'
+
+- name: create systemctl service files for kdc
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/krb5kdc.service
+    content: |
+      [Unit]
+      Description=Kerberos 5 KDC
+      Wants=network-online.target
+      After=syslog.target network.target network-online.target
+
+      [Service]
+      Type=forking
+      PIDFile=/usr/local/var/run/krb5kdc/krb5kdc.pid
+      EnvironmentFile=-/etc/sysconfig/krb5kdc
+      ExecStart=/usr/local/sbin/krb5kdc -P /usr/local/var/run/krb5kdc/krb5kdc.pid $KRB5KDC_ARGS
+      ExecReload=/bin/kill -HUP $MAINPID
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0640'
+  register: kdc_sysctl_srv
+
+- name: create systemctl service files for kadmin
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/kadmin.service
+    content: |
+      [Unit]
+      Description=Kerberos 5 Password-changing and Administration
+      Wants=network-online.target
+      After=syslog.target network.target network-online.target
+      AssertPathExists=!/var/kerberos/krb5kdc/kpropd.acl
+
+      [Service]
+      Type=forking
+      PIDFile=/usr/local/var/run/krb5kdc/kadmind.pid
+      EnvironmentFile=-/etc/sysconfig/kadmin
+      ExecStart=/usr/local/sbin/kadmind -P /usr/local/var/run/krb5kdc/kadmind.pid $KADMIND_ARGS
+      ExecReload=/bin/kill -HUP $MAINPID
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0640'
+  register: kadmin_sysctl_srv
+
+- name: reload systemd daemon & start kdc & kadmin server
+  ansible.builtin.systemd:
+    name: '{{ item }}'
+    state: started
+    daemon-reload: yes
+  when: kdc_sysctl_srv.changed or kadmin_sysctl_srv.changed
+  with_items:
+    - krb5kdc
+    - kadmin

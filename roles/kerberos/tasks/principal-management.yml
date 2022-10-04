@@ -1,12 +1,17 @@
 #tasks for principal management
+- name: set kerberos binaries & configs path
+  ansible.builtin.set_fact:
+    binaries_path: '{{ "/usr/local" if build_from_src else "/usr" }}'
+    conf_path: '{{ "/usr/local/var" if build_from_src else "/var/kerberos" }}'
+
 - name: set kdc vars
   ansible.builtin.set_fact:
-    db_location: '{{ (realms.db_location|default("/var/kerberos/krb5kdc"))+"/"+realms.domain+".db" }}'
+    db_location: '{{ (realms.db_location|default(conf_path+"/krb5kdc"))+"/"+realms.domain+".db" }}'
 
 - name: create user principals
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy users {{ item.name }}'
+      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy users {{ item.name }}'
   when: item.type == 'user'
   with_items: '{{ principals }}'
   no_log: true
@@ -14,7 +19,7 @@
 - name: create host principals
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts host/{{ item.name }}.{{ realms.domain }}'
+      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts host/{{ item.name }}.{{ realms.domain }}'
   when: item.type == 'host'
   with_items: '{{ principals }}'
   no_log: true
@@ -22,7 +27,7 @@
 - name: create admin principals
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy admin {{ item.name }}/admin'
+      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ item.pass }} -policy admin {{ item.name }}/admin'
   when: item.type == 'admin'
   with_items: '{{ principals }}'
   no_log: true
@@ -30,7 +35,7 @@
 - name: get list of existing principals
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'listprincs'
+      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'listprincs'
   register: existing_principals
 
 - name: create list of required principals
@@ -46,6 +51,6 @@
 - name: removing principals that shouldn't exists
   ansible.builtin.shell:
     cmd: >
-      /usr/sbin/kadmin.local -d {{ db_location }} -q 'delprinc -force {{ item.split('@')[0] }}'
+      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'delprinc -force {{ item.split('@')[0] }}'
   when: ('kadmin' not in item) and ('K/M' not in item) and ('kiprop' not in item) and ('krbtgt' not in item) and (item.split('@')[0] not in required_princs)
   with_items: '{{ existing_principals.stdout_lines[1:] }}'
