@@ -4,3 +4,6 @@
     - name: include role openldap
       ansible.builtin.include_role:
         name: openldap
+      tags:
+        - never
+        - server
