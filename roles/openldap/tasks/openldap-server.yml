@@ -161,34 +161,6 @@
     insertafter: '^# rootdn can always.*'
   when: not config_init.stat.exists
 
-- name: download & extract krb5 src
-  ansible.builtin.unarchive:
-    remote_src: yes
-    src: https://web.mit.edu/kerberos/dist/krb5/{{ openldap.kerberos.ver }}/krb5-{{ openldap.kerberos.ver }}.tar.gz
-    dest: /tmp
-  when: not config_init.stat.exists and openldap.kerberos_backend
-
-- name: copy kerberos schema file to openldap schema dir
-  ansible.builtin.copy:
-    remote_src: true
-    src: /tmp/krb5-{{ openldap.kerberos.ver }}/src/plugins/kdb/ldap/libkdb_ldap/kerberos.openldap.ldif
-    dest: /usr/local/etc/openldap/schema/kerberos.ldif
-  when: not config_init.stat.exists and openldap.kerberos_backend
-
-- name: remove krb5 dir
-  ansible.builtin.file:
-    path: /tmp/krb5-{{ openldap.kerberos.ver }}
-    state: absent
-  when: not config_init.stat.exists and openldap.kerberos_backend
-
-- name: update config with kerberos schema
-  ansible.builtin.lineinfile:
-    path: /usr/local/etc/openldap/slapd.ldif
-    regexp: '^.*kerberos.ldif'
-    line: 'include: file:///usr/local/etc/openldap/schema/kerberos.ldif'
-    insertafter: '^include.*ldif'
-  when: not config_init.stat.exists and openldap.kerberos_backend
-
 - name: import initial config
   ansible.builtin.shell:
     cmd: >
@@ -241,10 +213,6 @@
       server_uri: ldap://localhost/
       bind_dn: '{{ ldap_root_dn }}'
       bind_pw: '{{ openldap.root.password }}'
-    ldap_auth_config:
-      server_uri: ldap://localhost/
-      bind_dn: 'cn={{ openldap.config.user }}'
-      bind_pw: '{{ openldap.config.password }}'
 
 - name: add basedn
   community.general.ldap_entry:
@@ -278,52 +246,9 @@
       ou: groups
   args: '{{ ldap_auth }}'
 
-- name: add index for kerberos schema
-  community.general.ldap_attrs:
-    dn: 'olcDatabase={1}mdb,cn=config'
-    attributes:
-        olcDbIndex:
-            - objectClass eq
-            - krbPrincipalName eq,pres,sub
-  args: '{{ ldap_auth_config }}'
-  when: openldap.kerberos_backend
-
-- name: generate hash for kdc user
-  ansible.builtin.shell:
-    cmd: >
-      /usr/local/sbin/slappasswd -s {{ openldap.kerberos.bind_users.kdc.pass }}
-  register: kdc_bind_pass
-  when: openldap.kerberos_backend
-
-- name: add kerberos bind user
-  community.general.ldap_entry:
-    dn: 'uid={{ openldap.kerberos.bind_users.kdc.name }},{{ ldap_base_dn }}'
-    objectClass:
-      - simpleSecurityObject
-      - account
-    attributes:
-      uid: kdc-service
-      description: Account used for the Kerberos KDC
-      userPassword: '{{ kdc_bind_pass.stdout }}'
-  args: '{{ ldap_auth }}'
-  when: openldap.kerberos_backend
-
-- name: generate hash for kadmin user
-  ansible.builtin.shell:
-    cmd: >
-      /usr/local/sbin/slappasswd -s {{ openldap.kerberos.bind_users.kadmin.pass }}
-  register: kadmin_bind_pass
-  when: openldap.kerberos_backend
-
-- name: add kerberos bind user
-  community.general.ldap_entry:
-    dn: 'uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}'
-    objectClass:
-      - simpleSecurityObject
-      - account
-    attributes:
-      uid: kadmin
-      description: Account used for the Kerberos KDC
-      userPassword: '{{ kadmin_bind_pass.stdout }}'
-  args: '{{ ldap_auth }}'
-  when: openldap.kerberos_backend
+- name: configure ldap server for kerberos backend
+  ansible.builtin.include_tasks:
+    file: kerberos-backend.yml
+    apply:
+      tags: server
+  when: openldap.kerberos_backend|default('no')

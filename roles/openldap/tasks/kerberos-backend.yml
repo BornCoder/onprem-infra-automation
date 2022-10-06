@@ -1,0 +1,118 @@
+#tasks for configuring kerberos as backend
+- name: check if kerberos schema ldif file is already imported
+  ansible.builtin.find:
+    paths: /usr/local/etc/slapd.d/cn=config/cn=schema
+    patterns: '*kerberos.ldif'
+  register: kerberos_schema
+
+- name: set status of kerberos schema installation
+  ansible.builtin.set_fact:
+    install_kerberos_schema: '{{ "yes" if kerberos_schema.files|length == 0 else "no" }}'
+
+- name: check if kerberos schema file exists in openldap schema dir
+  ansible.builtin.stat:
+    path: /usr/local/etc/openldap/schema/kerberos.ldif
+  register: kerberos_ldif
+  when: install_kerberos_schema
+
+- name: download & extract krb5 src
+  ansible.builtin.unarchive:
+    remote_src: yes
+    src: https://web.mit.edu/kerberos/dist/krb5/{{ kerberos_version }}/krb5-{{ kerberos_version }}.tar.gz
+    dest: /tmp
+  when: install_kerberos_schema and not kerberos_ldif.stat.exists
+
+- name: copy kerberos schema file to openldap schema dir
+  ansible.builtin.copy:
+    remote_src: true
+    src: /tmp/krb5-{{ kerberos_version }}/plugins/kdb/ldap/libkdb_ldap/kerberos.openldap.ldif
+    dest: /usr/local/etc/openldap/schema/kerberos.ldif
+  when: install_kerberos_schema and not kerberos_ldif.stat.exists
+
+- name: remove krb5 dir
+  ansible.builtin.file:
+    path: /tmp/krb5-{{ kerberos_version }}
+    recurse: yes
+    state: absent
+  when: install_kerberos_schema and not kerberos_ldif.stat.exists
+
+- name: add kerberos schema to openldap
+  ansible.builtin.shell:
+    cmd: >
+      ldapadd -x -D cn={{ openldap.config.user }} -w {{ openldap.config.password }} -H ldap://localhost/ -f /usr/local/etc/openldap/schema/kerberos.ldif
+  when: install_kerberos_schema
+
+- name: set ldap config auth
+  ansible.builtin.set_fact:
+    ldap_auth_config:
+      server_uri: ldap://localhost/
+      bind_dn: 'cn={{ openldap.config.user }}'
+      bind_pw: '{{ openldap.config.password }}'
+
+- name: add index for kerberos schema
+  community.general.ldap_attrs:
+    dn: 'olcDatabase={1}mdb,cn=config'
+    attributes:
+        olcDbIndex:
+            - objectClass eq
+            - krbPrincipalName eq,pres,sub
+  args: '{{ ldap_auth_config }}'
+
+- name: generate hash for kdc user
+  ansible.builtin.shell:
+    cmd: >
+      /usr/local/sbin/slappasswd -s {{ openldap.kerberos.bind_users.kdc.pass }}
+  register: kdc_bind_pass
+
+- name: add kerberos bind user
+  community.general.ldap_entry:
+    dn: 'uid={{ openldap.kerberos.bind_users.kdc.name }},{{ ldap_base_dn }}'
+    objectClass:
+      - simpleSecurityObject
+      - account
+    attributes:
+      uid: kdc-service
+      description: Account used for the Kerberos KDC
+      userPassword: '{{ kdc_bind_pass.stdout }}'
+  args: '{{ ldap_auth }}'
+
+- name: generate hash for kadmin user
+  ansible.builtin.shell:
+    cmd: >
+      /usr/local/sbin/slappasswd -s {{ openldap.kerberos.bind_users.kadmin.pass }}
+  register: kadmin_bind_pass
+
+- name: add kerberos bind user
+  community.general.ldap_entry:
+    dn: 'uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}'
+    objectClass:
+      - simpleSecurityObject
+      - account
+    attributes:
+      uid: kadmin
+      description: Account used for the Kerberos KDC
+      userPassword: '{{ kadmin_bind_pass.stdout }}'
+  args: '{{ ldap_auth }}'
+
+- name: Set up the ACL
+  community.general.ldap_attrs:
+    dn: olcDatabase={1}mdb,cn=config
+    attributes:
+        olcAccess:
+          - >-
+            to attrs=krbPrincipalKey
+            by anonymous auth
+            by dn.exact="uid={{ openldap.kerberos.bind_users.kdc.name }},{{ ldap_base_dn }}" read
+            by dn.exact="uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}" write
+            by self write
+            by * none
+          - >-
+            to dn.subtree="cn={{ openldap.domain|upper }},cn=krbContainer,{{ ldap_base_dn }}"
+            by dn.exact="uid={{ openldap.kerberos.bind_users.kdc.name }},{{ ldap_base_dn }}" read
+            by dn.exact="uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}" write
+            by * none
+          - >-
+            to * by * read
+    ordered: yes
+    state: exact
+  args: '{{ ldap_auth_config }}'

@@ -26,7 +26,7 @@ openldap:
   kerberos_backend: yes #configures ldap server to be used as backend for kerberos
   kerberos:
     ver: '1.20' #required if kerberos backend is true , will be used to download sourcecode for extracting kerberos schema
-    bind_users:
+    bind_users: # make sure identical entry is present in kerberos role
       kdc:
         name: kdc-service
         pass: !vault |
