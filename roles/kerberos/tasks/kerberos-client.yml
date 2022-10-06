@@ -12,20 +12,39 @@
     - krb5-libs
     - krb5-workstation
 
-- name: download krb5.conf from kdc host
-  ansible.builtin.fetch:
-    src: /etc/krb5.conf
-    dest: /tmp/krb5.conf
-    flat: yes
-  when: ansible_hostname == kdc.host
-
 - name: copy krb5.conf to clients
   ansible.builtin.copy:
-    src: /tmp/krb5.conf
     dest: /etc/krb5.conf
+    content: |
+      # To opt out of the system crypto-policies configuration of krb5, remove the
+      # symlink at /etc/krb5.conf.d/crypto-policies which will not be recreated.
+      # includedir /etc/krb5.conf.d/
+
+      [logging]
+          default = FILE:/var/log/krb5libs.log
+          kdc = FILE:/var/log/krb5kdc.log
+          admin_server = FILE:/var/log/kadmind.log
+
+      [libdefaults]
+          dns_lookup_realm = false
+          ticket_lifetime = 24h
+          renew_lifetime = 7d
+          forwardable = true
+          rdns = false
+          pkinit_anchors = FILE:/etc/pki/tls/certs/ca-bundle.crt
+          spake_preauth_groups = {{ kdc.preauth_challenge }}
+          default_realm = {{ realms.domain | upper }}
+          default_ccache_name = KEYRING:persistent:%{uid}
+
+      [realms]
+       {{ realms.domain | upper }} = {
+          kdc = {{ realms.subdomain }}.{{ realms.domain }}
+          admin_server = {{ realms.subdomain }}.{{ realms.domain }}
+       }
     owner: root
     group: root
     mode: '0644'
+  when: ansible_hostname != kdc.host
 
 - name: check if keytab exists
   ansible.builtin.stat:

@@ -1,0 +1,45 @@
+# To opt out of the system crypto-policies configuration of krb5, remove the
+# symlink at /etc/krb5.conf.d/crypto-policies which will not be recreated.
+# includedir /etc/krb5.conf.d/
+
+[logging]
+    default = FILE:/var/log/krb5libs.log
+    kdc = FILE:/var/log/krb5kdc.log
+    admin_server = FILE:/var/log/kadmind.log
+
+[libdefaults]
+    dns_lookup_realm = false
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+    rdns = false
+    pkinit_anchors = FILE:/etc/pki/tls/certs/ca-bundle.crt
+    spake_preauth_groups = {{ kdc.preauth_challenge }}
+    default_realm = {{ realms.domain | upper }}
+    default_ccache_name = KEYRING:persistent:%{uid}
+
+[realms]
+ {{ realms.domain | upper }} = {
+    kdc = {{ realms.subdomain }}.{{ realms.domain }}
+    admin_server = {{ realms.subdomain }}.{{ realms.domain }}
+ }
+
+[domain_realm]
+ .{{ realms.domain }} = {{ realms.domain | upper }}
+ {{ realms.domain }} = {{ realms.domain | upper }}
+
+[dbmodules]
+ {{ realms.domain | upper }} = {
+{% if realms.db == 'ldap' %}
+    db_library = kldap
+    disable_last_success = true
+    disable_lockout  = true
+    ldap_kerberos_container_dn = "cn=krbContainer,dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
+    ldap_kdc_dn = "uid={{ realms.ldap.bind_users.kdc.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
+    ldap_kadmind_dn ="uid={{ realms.ldap.bind_users.kadmin.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
+    ldap_service_password_file = "{{ conf_path }}/krb5kdc/ldap.service.keyfile"
+    ldap_servers = "{{ realms.ldap.host }}"
+{% else %}
+    database_name = {{ db_location }}
+{% endif %}
+}

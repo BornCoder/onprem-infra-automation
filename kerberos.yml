@@ -6,7 +6,7 @@
         name: kerberos
       tags:
         - never
-        - kdc-kadmin
+        - server
         - principals
 
 - hosts: all

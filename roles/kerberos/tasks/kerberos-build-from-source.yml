@@ -39,7 +39,7 @@
   ansible.builtin.shell:
     chdir: /tmp/krb5-{{ ver }}/src
     cmd: >
-      ./configure --enable-dns --enable-dns-for-kdc --enable-dns-for-realm --enable-kdc-replay-cache
+      ./configure --with-ldap --enable-dns --enable-dns-for-kdc --enable-dns-for-realm --enable-kdc-replay-cache
   when: install_krb5 and not makefile.stat.exists
 
 - name: compile and install kerberos

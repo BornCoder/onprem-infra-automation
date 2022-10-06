@@ -4,7 +4,7 @@
     file: kerberos-build-from-source.yml
     apply:
       tags:
-        - kdc-kadmin
+        - server
   when: build_from_src
 
 - name: install kerberos from packages
@@ -74,43 +74,31 @@
   when: not krb5_conf_backup.stat.exists
 
 - name: update krb5.conf file
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: krb5.conf.j2
     dest: /etc/krb5.conf
-    content: |
-      # To opt out of the system crypto-policies configuration of krb5, remove the
-      # symlink at /etc/krb5.conf.d/crypto-policies which will not be recreated.
-      # includedir /etc/krb5.conf.d/
 
-      [logging]
-          default = FILE:/var/log/krb5libs.log
-          kdc = FILE:/var/log/krb5kdc.log
-          admin_server = FILE:/var/log/kadmind.log
+- name: check if servicekey file exists for ldap bind users
+  ansible.builtin.stat:
+    path: '{{ conf_path }}/krb5kdc/ldap.service.keyfile'
+  register: ldap_srvkeyfile
 
-      [libdefaults]
-          dns_lookup_realm = false
-          ticket_lifetime = 24h
-          renew_lifetime = 7d
-          forwardable = true
-          rdns = false
-          pkinit_anchors = FILE:/etc/pki/tls/certs/ca-bundle.crt
-          spake_preauth_groups = {{ kdc.preauth_challenge }}
-          default_realm = {{ realms.domain | upper }}
-          default_ccache_name = KEYRING:persistent:%{uid}
+- name: set rootdn args
+  ansible.builtin.set_fact:
+    rootdn_args: "-D cn={{ realms.ldap.root.user }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }} -w {{ realms.ldap.root.password }}"
 
-      [realms]
-       {{ realms.domain | upper }} = {
-          kdc = {{ realms.subdomain }}.{{ realms.domain }}
-          admin_server = {{ realms.subdomain }}.{{ realms.domain }}
-       }
-
-      [domain_realm]
-       .{{ realms.domain }} = {{ realms.domain | upper }}
-       {{ realms.domain }} = {{ realms.domain | upper }}
-
-      [dbmodules]
-       {{ realms.domain | upper }} = {
-          database_name = {{ db_location }}
-       }
+- name: create ldap bind users servicekey file if its doesn't exists
+  ansible.builtin.shell:
+    cmd: |
+      /usr/bin/echo -e "{{ vars['realms']['ldap']['bind_users'][item]['pass'] }}\n{{ vars['realms']['ldap']['bind_users'][item]['pass'] }}" | \
+      {{ binaries_path }}/sbin/kdb5_ldap_util {{ rootdn_args }} -H {{ realms.ldap.host }} \
+      stashsrvpw -f "{{ conf_path }}/krb5kdc/ldap.service.keyfile" \
+      uid={{ vars['realms']['ldap']['bind_users'][item]['name'] }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}
+  with_items:
+    - kdc
+    - kadmin
+  when: not ldap_srvkeyfile.stat.exists
+  no_log: true
 
 - name: update kadm5.acl file to define admin instance
   ansible.builtin.lineinfile:
@@ -118,47 +106,27 @@
     regexp: '.*EXAMPLE.COM.*'
     line: '*/admin@{{ realms.domain|upper }}    *'
 
+- name: set kerberos utils attributes
+  ansible.builtin.set_fact:
+    kdb5_bin: "{{ binaries_path }}/sbin/{{ 'kdb5_util' if realms.db == 'file' else 'kdb5_ldap_util' }}"
+    krb5util_args: "-M {{ master_key }} -r {{ realms.domain | upper }} {{ '-d '+db_location if realms.db == 'file' else rootdn_args+' -H '+realms.ldap.host }}"
+    kadmin_args: "{{ '-d '+db_location if realms.db == 'file' else '' }}"
+
 - name: check if principal db exists for realm {{ realms.domain }}
   ansible.builtin.shell:
     cmd: >
-      {{ binaries_path }}/sbin/kdb5_util -M {{ master_key }} -r {{ realms.domain | upper }} -d {{ db_location }} list_mkeys 2>&1 > /dev/null && echo 'True' || echo 'False'
+      {{ kdb5_bin }} {{ krb5util_args }} {{ 'list_mkeys' if realms.db == 'file' else 'list' }} 2>&1 > /dev/null && echo 'True' || echo 'False'
   register: principal_db
 
 - name: set stat for principal_db_exists for realm {{ realms.domain }}
   ansible.builtin.set_fact:
-    principal_db_exists: "{{ principal_db.stdout | bool }}"
+    principal_db_exists: '{{ principal_db.stdout | bool }}'
 
 - name: create principal db for realm {{ realms.domain }}
   ansible.builtin.shell:
     cmd: >
-      {{ binaries_path }}/sbin/kdb5_util -M {{ master_key }} -P {{ realms.master_pass }} -r {{ realms.domain | upper }} -d {{ db_location }} create -s
+      {{ kdb5_bin }} {{ krb5util_args }} -P {{ realms.master_pass }} create -s
   when: not principal_db_exists
-
-- name: create policies
-  ansible.builtin.shell:
-    cmd: >
-      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addpol {{ item }}'
-  with_items: '{{ realms.policies }}'
-
-- name: create root principal for managing kerberos
-  ansible.builtin.shell:
-    cmd: >
-      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -pw {{ realms.root_principal_pass }} -policy admin {{ realms.root_principal }}/admin'
-
-- name: create keytab file for kadmin
-  ansible.builtin.shell:
-    cmd: >
-      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'ktadd -k /var/kerberos/krb5kdc/kadm5.keytab kadmin/admin kadmin/changepw'
-
-- name: create principal for kdc host
-  ansible.builtin.shell:
-    cmd: >
-      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'addprinc -randkey -policy hosts {{ realms.subdomain }}.{{ realms.domain }}/host'
-
-- name: create keytab file for kdc host
-  ansible.builtin.shell:
-    cmd: >
-      {{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} -q 'ktadd -k /etc/krb5.keytab {{ realms.subdomain }}.{{ realms.domain }}/host'
 
 - name: restart kerberos services
   ansible.builtin.service:
@@ -167,6 +135,32 @@
   with_items:
     - 'krb5kdc'
     - 'kadmin'
+
+- name: create policies
+  ansible.builtin.shell:
+    cmd: >
+      {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'addpol {{ item }}'
+  with_items: '{{ realms.policies }}'
+
+- name: create root principal for managing kerberos
+  ansible.builtin.shell:
+    cmd: >
+      {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'addprinc -pw {{ realms.root_principal_pass }} -policy admin {{ realms.root_principal }}/admin'
+
+- name: create keytab file for kadmin
+  ansible.builtin.shell:
+    cmd: >
+      {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'ktadd -k /var/kerberos/krb5kdc/kadm5.keytab kadmin/admin kadmin/changepw'
+
+- name: create principal for kdc host
+  ansible.builtin.shell:
+    cmd: >
+      {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'addprinc -randkey -policy hosts {{ realms.subdomain }}.{{ realms.domain }}/host'
+
+- name: create keytab file for kdc host
+  ansible.builtin.shell:
+    cmd: >
+      {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'ktadd -k /etc/krb5.keytab {{ realms.subdomain }}.{{ realms.domain }}/host'
 
 - name: allow kerberos service through firewall
   ansible.posix.firewalld:
@@ -186,6 +180,6 @@
     line: '{{ item.line }}'
   with_items:
     - reg: '^alias kadmin.local=.*'
-      line: 'alias kadmin.local="{{ binaries_path }}/sbin/kadmin.local -d {{ db_location }} "'
+      line: 'alias kadmin.local="{{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} "'
     - reg: '^alias kdb5_util=.*'
-      line: 'alias kdb5_util="{{ binaries_path }}/sbin/kdb5_util -d {{ db_location }} -M {{ master_key }} -r {{ realms.domain | upper }} "'
+      line: 'alias kdb5_util="{{ binaries_path }}/sbin/kdb5_util {{ krb5util_args }} "'

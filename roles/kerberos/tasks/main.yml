@@ -4,10 +4,10 @@
   ansible.builtin.include_tasks:
     file: kdc-kadmin-server.yml
     apply:
-      tags: kdc-kadmin
+      tags: server
   tags:
     - never
-    - kdc-kadmin
+    - server
 
 - name: include tasks for managing principals
   ansible.builtin.include_tasks:
