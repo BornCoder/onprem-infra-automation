@@ -39,4 +39,7 @@ dns_records:
     ip: 192.168.11.8
   - type: CNAME
     subdomain: kdc
-    target: admin.private.net.
+    target: dns.private.net.
+  - type: CNAME
+    subdomain: ldap
+    target: dns.private.net.
