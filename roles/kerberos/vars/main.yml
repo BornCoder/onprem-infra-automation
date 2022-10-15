@@ -20,6 +20,7 @@ realms:
   #db_location: #when db is file, default dir /var/kerberos/krb5kdc. Final db file created will be {{ db_location }}/{{ realms.domain }}.db
   ldap: # required if kerberos db is ldap
     host: ldap://ldap.private.net
+    subtree: 'ou=users' #kerberos principals will be created under ou=users,dc=private,dc=net
     root:
       user: admin
       password: !vault |

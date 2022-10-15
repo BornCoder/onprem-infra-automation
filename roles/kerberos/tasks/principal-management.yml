@@ -18,7 +18,7 @@
       {{ binaries_path }}/sbin/kadmin.local {{ kadmin_args }} -q 'addprinc -pw {{ item.pass }} -policy users {{ item.name }}'
   when: item.type == 'user'
   with_items: '{{ principals }}'
-  #no_log: true
+  no_log: true
 
 - name: create host principals
   ansible.builtin.shell:
