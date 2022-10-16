@@ -1,0 +1,5 @@
+#groups data
+posix_groups:
+  - name: sshusers
+    gid: 10000
+    desc: "users added to this group will have ssh capabilities to all the hosts"

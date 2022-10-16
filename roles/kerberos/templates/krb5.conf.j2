@@ -35,8 +35,8 @@
     disable_last_success = true
     disable_lockout  = true
     ldap_kerberos_container_dn = "cn=krbContainer,dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
-    ldap_kdc_dn = "uid={{ realms.ldap.bind_users.kdc.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
-    ldap_kadmind_dn ="uid={{ realms.ldap.bind_users.kadmin.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
+    ldap_kdc_dn = "uid={{ openldap.kerberos.bind_users.kdc.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
+    ldap_kadmind_dn ="uid={{ openldap.kerberos.bind_users.kadmin.name }},dc={{ realms.domain.split('.')[0] }},dc={{ realms.domain.split('.')[1] }}"
     ldap_service_password_file = "{{ conf_path }}/krb5kdc/ldap.service.keyfile"
     ldap_servers = "{{ realms.ldap.host }}"
 {% else %}

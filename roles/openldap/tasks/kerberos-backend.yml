@@ -112,7 +112,7 @@
             by dn.exact="uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}" write
             by * none
           - >-
-            to dn.subtree="ou=users,cn=krbContainer,{{ ldap_base_dn }}"
+            to dn.subtree="ou=users,{{ ldap_base_dn }}"
             by dn.exact="uid={{ openldap.kerberos.bind_users.kdc.name }},{{ ldap_base_dn }}" read
             by dn.exact="uid={{ openldap.kerberos.bind_users.kadmin.name }},{{ ldap_base_dn }}" write
             by * none

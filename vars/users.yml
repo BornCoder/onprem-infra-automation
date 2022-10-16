@@ -1,0 +1,21 @@
+#users data
+users:  
+  - name: alice
+    uid: 1000
+    groups: [ 'sshusers' ]
+  - name: bob
+    uid: 1001
+    groups: [ 'sshusers' ]
+  - name: charlie
+    uid: 1002
+  - name: dan
+    uid: 1003
+    groups: [ 'sshusers' ]
+    kadmin: yes
+
+hosts:
+  - name: dns
+  - name: master1
+  - name: slave1
+  - name: slave2
+  - name: slave3

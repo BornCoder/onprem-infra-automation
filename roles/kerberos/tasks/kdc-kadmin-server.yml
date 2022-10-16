@@ -73,6 +73,10 @@
     dest: /etc/krb5.original.conf
   when: not krb5_conf_backup.stat.exists
 
+- name: include kerberos bind users details
+  ansible.builtin.include_vars:
+    file: roles/openldap/vars/main.yml
+
 - name: update krb5.conf file
   ansible.builtin.template:
     src: krb5.conf.j2
@@ -89,15 +93,15 @@
 
 - name: set rootdn args
   ansible.builtin.set_fact:
-    rootdn_args: "-D cn={{ realms.ldap.root.user }}{{ root_domain }} -w {{ realms.ldap.root.password }}"   
+    rootdn_args: "-D cn={{ openldap.root.user }}{{ root_domain }} -w {{ openldap.root.password }}"
 
 - name: create ldap bind users servicekey file if its doesn't exists
   ansible.builtin.shell:
     cmd: |
-      /usr/bin/echo -e "{{ vars['realms']['ldap']['bind_users'][item]['pass'] }}\n{{ vars['realms']['ldap']['bind_users'][item]['pass'] }}" | \
+      /usr/bin/echo -e "{{ vars['openldap']['kerberos']['bind_users'][item]['pass'] }}\n{{ vars['openldap']['kerberos']['bind_users'][item]['pass'] }}" | \
       {{ binaries_path }}/sbin/kdb5_ldap_util {{ rootdn_args }} -H {{ realms.ldap.host }} \
       stashsrvpw -f "{{ conf_path }}/krb5kdc/ldap.service.keyfile" \
-      uid={{ vars['realms']['ldap']['bind_users'][item]['name'] }}{{ root_domain }}
+      uid={{ vars['openldap']['kerberos']['bind_users'][item]['name'] }}{{ root_domain }}
   with_items:
     - kdc
     - kadmin

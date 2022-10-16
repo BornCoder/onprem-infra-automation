@@ -1,0 +1,94 @@
+- hosts: localhost
+  vars_files:
+    - roles/openldap/vars/main.yml
+    - roles/kerberos/vars/main.yml
+  tasks:
+    - name: include vars files
+      ansible.builtin.include_vars:
+        dir: vars
+
+    - name: set base dn
+      ansible.builtin.set_fact:
+        ldap_base_dn: 'dc={{ openldap.domain.split(".")[0] }},dc={{ openldap.domain.split(".")[1] }}'
+
+    - name: set ldap auth
+      ansible.builtin.set_fact:
+        ldap_auth:
+          server_uri: ldap://{{ openldap.subdomain }}.{{ openldap.domain }}/
+          bind_dn: 'cn={{ openldap.root.user }},{{ ldap_base_dn }}'
+          bind_pw: '{{ openldap.root.password }}'
+
+    - name: set users & groups base dn
+      ansible.builtin.set_fact:
+        users_base_dn: 'ou=users,{{ ldap_base_dn }}'
+        groups_base_dn: 'ou=groups,{{ ldap_base_dn }}'
+
+    - name: add groups to ldap
+      community.general.ldap_entry:
+        dn: 'cn={{ item.name }},{{ groups_base_dn }}'
+        objectClass:
+          - top
+          - posixGroup
+        attributes:
+          cn: '{{ item.name }}'
+          gidNumber: '{{ item.uid|default(item.gid) }}'
+          description: '{{ item.desc|default("primary group for user "+item.name) }}'
+      args: '{{ ldap_auth }}'
+      loop: '{{ users + posix_groups }}'
+
+    - name: add users to ldap
+      community.general.ldap_entry:
+        dn: 'uid={{ item.name }},{{ users_base_dn }}'
+        objectClass:
+          - top
+          - inetOrgPerson
+          - posixAccount
+          - shadowAccount
+        attributes:
+          cn: '{{ item.name }}'
+          sn: '{{ item.name }}'
+          uid: '{{ item.name }}'
+          uidNumber: '{{ item.uid }}'
+          gidNumber: '{{ item.uid }}'
+          homeDirectory: '/home/{{ item.name }}'
+          loginShell: '/bin/bash'
+      args: '{{ ldap_auth }}'
+      loop: '{{ users }}'
+
+    - name: add users to additional groups
+      community.general.ldap_attrs:
+        dn: 'cn={{ item[1].name }},{{ groups_base_dn }}'
+        attributes:
+          memberUid: '{{ item[0].name }}'
+      args: '{{ ldap_auth }}'
+      when: item[1].name in item[0].groups|default([])
+      loop: '{{ users | product(posix_groups) | list }}'
+
+    - name: set kerberos binaries path
+      ansible.builtin.set_fact:
+        binaries_path: '{{ "/usr/local" if build_from_src else "/usr" }}'
+
+    - name: set kadmin args
+      ansible.builtin.set_fact:
+        kadmin_args: '-p {{ realms.root_principal }}/admin -w {{ realms.root_principal_pass }}'
+
+    - name: get users from ldap
+      community.general.ldap_search:
+        dn: '{{ users_base_dn }}'
+        scope: "onelevel"
+        attrs:
+          - cn
+      args: '{{ ldap_auth }}'
+      register: ldap_users_list
+
+    - name: add kerberos user principals
+      ansible.builtin.shell:
+        cmd: >
+          {{ binaries_path }}/bin/kadmin {{ kadmin_args }} -q 'addprinc -pw {{ vars['users_pass'][item.name] }} -policy {{ 'admin' if item.kadmin|default(False) else 'users' }} -x dn=uid={{ item.name }},{{ users_base_dn }} {{ item.name }}{{ '/admin' if item.kadmin|default(False) }}'
+      loop: '{{ users }}'
+
+    - name: add kerberos host principals
+      ansible.builtin.shell:
+        cmd: >
+          {{ binaries_path }}/bin/kadmin {{ kadmin_args }} -q 'addprinc -randkey -policy hosts host/{{ item.name }}.{{ realms.domain }}'
+      loop: '{{ hosts }}'
